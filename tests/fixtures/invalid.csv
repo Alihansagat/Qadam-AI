@@ -1,0 +1,2 @@
+date,sku,name,units,price,cost,stock,on_order,lead_days
+2026-02-30,TEST-1,Некорректная дата,2,1000,400,18,0,3
