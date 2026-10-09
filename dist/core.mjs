@@ -1,3 +1,4 @@
+import {predict,evaluate,METHODS} from './forecast.mjs';
 export const HEADERS=['date','sku','name','units','price','cost','stock','on_order','lead_days'];
 export const DAY=86400000;
 export const addDays=(date,n)=>new Date(Date.parse(date+'T00:00:00Z')+n*DAY).toISOString().slice(0,10);
@@ -49,40 +50,29 @@ export function parseCSV(text){
   return {rows:errors.length?[]:out.sort((a,b)=>a.date.localeCompare(b.date)||a.sku.localeCompare(b.sku)),errors,total:rows.length};
 }
 export function csv(rows){const encode=v=>{let s=String(v);if(/^[=+\-@\t\r]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';};return HEADERS.join(',')+'\n'+rows.map(r=>HEADERS.map(k=>encode(r[k])).join(',')).join('\n');}
-function predict(history,horizon,method){
-  const values=history.map(r=>r.units);
-  return Array.from({length:horizon},(_,i)=>{
-    const target=history.length+i;
-    if(method==='weekly'){const index=history.length-7+(i%7);return values[index]??mean(values);}
-    const sameDay=values.filter((_,j)=>j>=values.length-28&&(target-j)%7===0);
-    return mean(sameDay.length?sameDay:values.slice(-7));
-  });
-}
-export function analyze(rows,horizon=14,safetyDays=3){
+export function analyze(rows,horizon=14,safetyDays=3,options={}){
   if(![7,14,30].includes(horizon)||!Number.isInteger(safetyDays)||safetyDays<0||safetyDays>30)throw Error('Неверные параметры прогноза.');
+  const period=options.period??14,overrides=options.methods??new Map();
+  if(![7,14,30].includes(period)||!(overrides instanceof Map)||[...overrides.values()].some(m=>!Object.hasOwn(METHODS,m)))throw Error('Неверный период или метод.');
   if(!rows.length)return null;
-  const end=rows.reduce((a,r)=>a>r.date?a:r.date,''),start=addDays(end,-13),previous=addDays(start,-14);
+  const end=rows.reduce((a,r)=>a>r.date?a:r.date,''),start=addDays(end,1-period),previous=addDays(start,-period);
   const groups=new Map();for(const r of rows){if(!groups.has(r.sku))groups.set(r.sku,[]);groups.get(r.sku).push(r);}
   const recent=rows.filter(r=>r.date>=start),prev=rows.filter(r=>r.date>=previous&&r.date<start);
   const revenue=sum(recent.map(r=>r.units*r.price)),prevRevenue=sum(prev.map(r=>r.units*r.price));
   const products=[...groups].map(([sku,series])=>{
     series.sort((a,b)=>a.date.localeCompare(b.date));const last=series.at(-1),enough=series.length>=28;
-    let method='weekday',validation=null;
-    if(series.length>=42){
-      const train=series.slice(0,-14),actual=series.slice(-14).map(r=>r.units);
-      const candidates=['weekly','weekday'].map(m=>{const pred=predict(train,14,m),abs=sum(pred.map((v,i)=>Math.abs(v-actual[i])));return {method:m,mae:abs/14,wape:sum(actual)?abs/sum(actual)*100:null};});
-      candidates.sort((a,b)=>a.mae-b.mae);method=candidates[0].method;validation={...candidates[0],candidates,days:14};
-    }
+    const validation=evaluate(series),autoMethod=validation?.method??'weekday';
+    const method=overrides.get(sku)??autoMethod;
     const forecast=enough?predict(series,Math.max(horizon,last.lead_days+safetyDays,1),method):[];
     const total=enough?sum(forecast.slice(0,horizon)):null;
     const target=enough?sum(forecast.slice(0,last.lead_days+safetyDays)):null;
     const suggested=enough?Math.max(0,Math.ceil(target-last.stock-last.on_order)):null;
     let accumulated=0,stockout=null;for(let i=0;i<forecast.length;i++){accumulated+=forecast[i];if(accumulated>last.stock){stockout=i;break;}}
     const sold=series.filter(r=>r.date>=start);
-    return {...last,sku,history:series,days:series.length,enough,method,validation,forecast,total,suggested,target,stockout,revenue:sum(sold.map(r=>r.units*r.price)),margin:sum(sold.map(r=>r.units*(r.price-r.cost))),sold:sum(sold.map(r=>r.units)),budget:suggested===null?null:suggested*last.cost,stockValue:last.stock*last.cost};
+    return {...last,sku,history:series,days:series.length,enough,method,autoMethod,manual:overrides.has(sku),validation,forecast,total,suggested,target,stockout,revenue:sum(sold.map(r=>r.units*r.price)),margin:sum(sold.map(r=>r.units*(r.price-r.cost))),sold:sum(sold.map(r=>r.units)),budget:suggested===null?null:suggested*last.cost,stockValue:last.stock*last.cost};
   }).sort((a,b)=>b.revenue-a.revenue);
-  const daily=Array.from({length:14},(_,i)=>{const date=addDays(start,i);return {date,revenue:sum(recent.filter(r=>r.date===date).map(r=>r.units*r.price))};});
-  return {end,start,revenue,margin:sum(recent.map(r=>r.units*(r.price-r.cost))),units:sum(recent.map(r=>r.units)),change:prevRevenue&&rows.every(r=>groups.get(r.sku)[0].date<=previous)?(revenue/prevRevenue-1)*100:null,products,daily,budget:sum(products.map(p=>p.budget||0)),actions:products.filter(p=>p.suggested>0).sort((a,b)=>(a.stockout??999)-(b.stockout??999)),horizon,safetyDays};
+  const daily=Array.from({length:period},(_,i)=>{const date=addDays(start,i);return {date,revenue:sum(recent.filter(r=>r.date===date).map(r=>r.units*r.price))};});
+  return {end,start,period,revenue,margin:sum(recent.map(r=>r.units*(r.price-r.cost))),units:sum(recent.map(r=>r.units)),change:prevRevenue&&[...groups.values()].every(g=>g[0].date<=previous)?(revenue/prevRevenue-1)*100:null,products,daily,budget:sum(products.map(p=>p.budget||0)),actions:products.filter(p=>p.suggested>0).sort((a,b)=>(a.stockout??999)-(b.stockout??999)),horizon,safetyDays};
 }
 export function demo(){
   const catalog=[['Q-001','Крем для лица · 50 мл',6900,3200,18,0,7,6],['Q-002','Сыворотка витамин C',8900,4300,25,8,10,4],['Q-003','Гель для умывания',4200,1900,145,0,5,8],['Q-004','SPF 50 · защита',7400,3600,14,0,8,5],['Q-005','Бальзам для губ',1900,650,220,0,4,11],['Q-006','Тоник увлажняющий',5100,2300,76,0,7,4]];

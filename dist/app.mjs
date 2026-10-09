@@ -1,23 +1,31 @@
 import {demo,analyze,parseCSV,csv,addDays,sum} from './core.mjs';
+import {METHODS} from './forecast.mjs';
 const app=document.querySelector('#app'),fmt=new Intl.NumberFormat('ru-RU',{maximumFractionDigits:0}),dec=new Intl.NumberFormat('ru-RU',{maximumFractionDigits:1});
 const n=v=>fmt.format(v),money=v=>n(v)+' ₸',esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const date=v=>new Date(v+'T00:00:00Z').toLocaleDateString('ru-RU',{day:'numeric',month:'short',timeZone:'UTC'});
-const state={rows:demo(),source:'demo',file:'',horizon:14,safety:3,sku:null,actions:new Map(),importResult:null};
+const date=v=>new Date(v+'T00:00:00Z').toLocaleDateString('ru-RU',{day:'numeric',month:'short',timeZone:'UTC'}).replace(/\.$/,'');
+const state={rows:demo(),source:'demo',file:'',horizon:14,period:14,safety:3,sku:null,methods:new Map(),actions:new Map(),importResult:null,query:'',stockFilter:'all',complete:false,busy:false};
 const titles={overview:'Обзор продаж',forecast:'Прогноз спроса',actions:'План закупок',import:'Импорт данных'};
+document.querySelector('.profile small').textContent='Qadam AI · MVP 0.2';
+document.querySelector('.sidebar-bottom .small-label').textContent='ПЯТЬ МЕТОДОВ ПРОГНОЗА';
 let result=analyze(state.rows),view='overview';
+let revision=0,cachedKey='';
+const pct=v=>v===null?'—':dec.format(v)+'%';
+const selectedProduct=()=>result.products.find(p=>p.sku===state.sku)||result.products[0];
+const periods=(field,current)=>`<div class="segmented" role="group" aria-label="${field==='period'?'Период аналитики':'Горизонт прогноза'}">${[7,14,30].map(d=>`<button data-setting="${field}" data-value="${d}" aria-pressed="${current===d}">${d} дней</button>`).join('')}</div>`;
 function notify(message){const el=document.querySelector('#toast');el.textContent=message;el.classList.add('show');clearTimeout(notify.timer);notify.timer=setTimeout(()=>el.classList.remove('show'),3500);}
 function download(name,text,type='text/csv;charset=utf-8'){const url=URL.createObjectURL(new Blob(['\uFEFF',text],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function chart(values,labels,{forecastFrom=null,unit='₸'}={}){
-  const w=700,h=230,left=52,right=12,top=14,bottom=35,max=Math.max(...values,1)*1.2;
+  const w=780,h=270,left=58,right=20,top=22,bottom=38,max=Math.max(...values,1)*1.2;
   const x=i=>left+i*(w-left-right)/Math.max(1,values.length-1),y=v=>h-bottom-v/max*(h-top-bottom);
   const path=(start,end)=>values.slice(start,end).map((v,j)=>`${j?'L':'M'}${x(j+start).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
   const cut=forecastFrom??values.length;
   const area=path(0,cut)+` L${x(cut-1)},${h-bottom} L${left},${h-bottom} Z`;
-  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="График: ${esc(labels[0])} — ${esc(labels.at(-1))}, значения в ${unit}">${[0,1,2,3].map(i=>{const v=max*i/3;return `<line x1="${left}" y1="${y(v)}" x2="${w-right}" y2="${y(v)}" stroke="#eaf0ec" stroke-dasharray="3 4"/><text x="${left-8}" y="${y(v)+4}" text-anchor="end">${v>=1000?dec.format(v/1000)+'к':n(v)}</text>`;}).join('')}<path d="${area}" fill="#edf5ef"/><path d="${path(0,cut)}" fill="none" stroke="#286c55" stroke-width="2.6" stroke-linejoin="round"/>${forecastFrom!==null?`<line x1="${x(cut-1)}" y1="${top}" x2="${x(cut-1)}" y2="${h-bottom}" stroke="#adc4a4" stroke-dasharray="4 4"/><path d="${path(cut-1,values.length)}" fill="none" stroke="#8eb63b" stroke-width="2.8" stroke-dasharray="6 5"/>`:''}${labels.map((l,i)=>(i===0||i===labels.length-1||i%Math.ceil(labels.length/5)===0)?`<text x="${x(i)}" y="${h-8}" text-anchor="${i===0?'start':i===labels.length-1?'end':'middle'}">${date(l)}</text>`:'').join('')}</svg>`;
+  const ticks=[...new Set([0,1,2,3,4,5].map(i=>Math.round(i*(labels.length-1)/5)))];
+  return `<div class="chart-scroll"><svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="График: ${esc(labels[0])} — ${esc(labels.at(-1))}, значения в ${unit}">${forecastFrom!==null?`<rect x="${x(cut-1)}" y="${top}" width="${w-right-x(cut-1)}" height="${h-bottom-top}" fill="#f4f0fc"/><text x="${x(cut-1)+10}" y="${top+15}" fill="#7962b8">Прогноз</text>`:''}${[0,1,2,3].map(i=>{const v=max*i/3;return `<line x1="${left}" y1="${y(v)}" x2="${w-right}" y2="${y(v)}" stroke="#e4eae7" stroke-dasharray="3 5"/><text x="${left-10}" y="${y(v)+5}" text-anchor="end">${v>=1000?dec.format(v/1000)+'к':n(v)}</text>`;}).join('')}<path d="${area}" fill="#eaf4ee"/><path d="${path(0,cut)}" fill="none" stroke="#286c55" stroke-width="2.8" stroke-linejoin="round"/>${forecastFrom!==null?`<line x1="${x(cut-1)}" y1="${top}" x2="${x(cut-1)}" y2="${h-bottom}" stroke="#c7b8e5" stroke-dasharray="4 4"/><path d="${path(cut-1,values.length)}" fill="none" stroke="#8562bd" stroke-width="2.8" stroke-dasharray="6 4"/>`:''}${values.map((v,i)=>`<circle class="chart-point" cx="${x(i)}" cy="${y(v)}" r="5" fill="${forecastFrom!==null&&i>=cut?'#8562bd':'#286c55'}"><title>${date(labels[i])}: ${dec.format(v)} ${unit}</title></circle>`).join('')}${ticks.map(i=>`<text x="${x(i)}" y="${h-8}" text-anchor="${i===0?'start':i===labels.length-1?'end':'middle'}">${date(labels[i])}</text>`).join('')}</svg></div>`;
 }
 const stat=(label,value,note,primary=false)=>`<div class="stat ${primary?'primary-stat':''}"><div class="stat-label">${label}<span class="stat-icon">${primary?'◈':'◌'}</span></div><div class="stat-value">${value}</div><div class="stat-note">${note}</div></div>`;
 const head=(title,subtitle,control='')=>`<div class="page-head"><div><h1>${title}</h1><p class="subtitle">${subtitle}</p></div>${control}</div>`;
-const methodName=p=>p.method==='weekly'?'Как неделю назад':'Среднее по дням недели';
+const methodName=p=>METHODS[p.method].name;
 function productTable(products){return `<div class="table-wrap"><table><thead><tr><th>Товар</th><th class="num">Продано, шт.</th><th class="num">Выручка</th><th class="num">Валовая прибыль</th><th class="num">Остаток, шт.</th><th>Запасы</th></tr></thead><tbody>${products.map(p=>`<tr><td class="product-name">${esc(p.name)}<small>${esc(p.sku)}</small></td><td class="num">${n(p.sold)}</td><td class="num">${money(p.revenue)}</td><td class="num">${money(p.margin)}</td><td class="num">${n(p.stock)}</td><td><span class="badge ${!p.enough?'neutral':p.suggested>0?'warn':''}">${!p.enough?'Мало истории':p.suggested>0?'Нужна закупка':'Достаточно'}</span></td></tr>`).join('')}</tbody></table></div>`;}
 function overview(){
   const r=result;return head('Бизнес под контролем','Продажи, запасы и следующие шаги вашего магазина.',`<div class="date-pill">${date(r.start)} — ${date(r.end)} ${r.end.slice(0,4)}</div>`)+
@@ -27,11 +35,15 @@ function overview(){
   <section class="panel"><div class="panel-head"><div><h2>Товары в цифрах</h2><div class="meta">Продажи за 14 дней · остатки на ${date(r.end)}</div></div></div>${productTable(r.products)}</section>`;
 }
 function forecast(){
-  const r=result,p=r.products.find(p=>p.sku===state.sku)||r.products[0];state.sku=p.sku;
-  const hist=p.history.slice(-28),future=Array.from({length:state.horizon},(_,i)=>addDays(r.end,i+1));
-  return head('Спрос на шаг вперёд','Планируйте закупки с опорой на историю продаж.',`<label class="form-control">Горизонт <select id="horizon">${[7,14,30].map(d=>`<option ${state.horizon===d?'selected':''} value="${d}">${d} дней</option>`).join('')}</select></label>`)+
-  `<section class="panel"><div class="panel-head"><div><h2>Прогноз по товару</h2><div class="meta">История и ожидаемые продажи, шт.</div></div><label class="form-control">Товар <select id="product">${r.products.map(x=>`<option value="${esc(x.sku)}" ${x.sku===p.sku?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label></div>${p.enough?`<div class="forecast-summary"><div><span class="meta">Прогноз на ${state.horizon} дней</span><strong>${n(p.total)} шт.</strong></div><div><span class="meta">На складе</span><strong>${n(p.stock)} шт.</strong></div><div><span class="meta">В пути</span><strong>${n(p.on_order)} шт.</strong></div></div>${chart([...hist.map(x=>x.units),...p.forecast.slice(0,state.horizon)],[...hist.map(x=>x.date),...future],{forecastFrom:hist.length,unit:'шт.'})}<div class="legend"><span>Фактические продажи</span><span class="forecast">Прогноз</span></div>`:`<div class="empty">Пока ${p.days} дней истории. Для прогноза нужно минимум 28 последовательных дней.</div>`}</section>
-  <div class="grid-main"><section class="panel"><h2>Как получен прогноз</h2><p class="note">${p.enough?`Используется метод «${methodName(p)}». ${p.method==='weekly'?'Повторяем продажи последней недели.':'Берём средние продажи соответствующего дня недели за последние четыре недели.'}`:'Прогноз ещё недоступен.'}</p><p class="note">При 42 днях истории сравниваем два метода на последних 14 днях: обучающая часть заканчивается до этого периода. Затем выбранный метод использует всю историю для нового прогноза.</p><div class="callout">Это статистический прогноз наблюдаемых продаж. Акции, изменение цены и потерянный спрос при отсутствии товара не моделируются. Интервал вероятности пока не рассчитывается.</div></section><section class="panel"><h2>Проверка на истории</h2><div class="meta">${p.validation?'Последние 14 дней · период выбора метода':'Нужно минимум 42 дня истории'}</div>${p.validation?`<div class="forecast-summary"><div><span class="meta">Средняя ошибка в день</span><strong>${dec.format(p.validation.mae)} шт.</strong></div><div><span class="meta">WAPE</span><strong>${p.validation.wape===null?'—':dec.format(p.validation.wape)+'%'}</strong></div></div>${p.validation.candidates.map(c=>`<div class="list-item"><span class="meta">${c.method==='weekly'?'Как неделю назад':'Среднее по дням недели'}</span><strong>${dec.format(c.mae)} шт.</strong></div>`).join('')}<p class="meta">WAPE — сумма абсолютных ошибок / сумма фактических продаж. Это проверка для выбора метода, не независимый тест будущего качества.</p>`:'<div class="empty">Больше истории — надёжнее сравнение.</div>'}</section></div>`;
+  const r=result,p=selectedProduct();state.sku=p.sku;
+  const hist=p.history.slice(-28),future=Array.from({length:state.horizon},(_,i)=>addDays(r.end,i+1)),v=p.validation,t=v?.test;
+  return head('Прогноз, которому есть объяснение','Пять методов. Проверка на истории. Понятный выбор.',periods('horizon',state.horizon))+
+  `<section class="panel forecast-controls"><label for="product">Товар<select id="product">${r.products.map(x=>`<option value="${esc(x.sku)}" ${x.sku===p.sku?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label><label for="method">Метод<select id="method" ${p.enough?'':'disabled'}><option value="auto" ${!p.manual?'selected':''}>Автовыбор ${v?'по проверке':'· недельное среднее'}</option>${Object.entries(METHODS).map(([key,m])=>`<option value="${key}" ${p.manual&&p.method===key?'selected':''}>${m.name}</option>`).join('')}</select></label><button id="export-forecast" class="button" ${p.enough?'':'disabled'}>Скачать прогноз</button></section>
+  <section class="panel"><div class="panel-head"><div><h2>${esc(p.name)}</h2><div class="meta">${p.days} дней истории · по ${date(r.end)} ${r.end.slice(0,4)}</div></div><span class="badge ${p.manual?'warn':''}">${p.manual?'Ручной выбор':'Автовыбор'} · ${METHODS[p.method].short}</span></div>
+  ${p.enough?`<div class="forecast-summary"><div><span class="meta">Прогноз на ${state.horizon} дней</span><strong>${n(p.total)} <small>шт.</small></strong></div><div><span class="meta">В среднем за день</span><strong>${dec.format(p.total/state.horizon)} <small>шт.</small></strong></div><div><span class="meta">На складе</span><strong>${n(p.stock)} <small>шт.</small></strong></div><div><span class="meta">В пути</span><strong>${n(p.on_order)} <small>шт.</small></strong></div></div>${chart([...hist.map(x=>x.units),...p.forecast.slice(0,state.horizon)],[...hist.map(x=>x.date),...future],{forecastFrom:hist.length,unit:'шт.'})}<div class="legend"><span>Продажи</span><span class="forecast">Прогноз</span><span class="hint">Наведите на точку для значения</span></div>`:`<div class="empty">Сейчас ${p.days} дней истории. Для прогноза нужно минимум 28 последовательных дней.</div>`}<div class="method-note">${METHODS[p.method].description} Выбранный метод также используется в плане закупок этого товара.</div></section>
+  <div class="evaluation-grid"><section class="panel"><div class="panel-head"><div><h2>Сравнение методов</h2><div class="meta">${v?`${v.folds} периода по 14 дней · ${date(v.start)} — ${date(v.end)}`:'Нужно минимум 42 дня истории'}</div></div><span class="badge neutral">Меньше ошибка — лучше</span></div>${v?`<div class="table-wrap"><table><thead><tr><th>Метод</th><th class="num">MAE, шт./день</th><th class="num">WAPE</th></tr></thead><tbody>${v.candidates.map((c,i)=>`<tr class="${i===0?'best-model':''}"><td>${METHODS[c.method].name}${i===0?'<small class="best-tag">Лучший на проверке</small>':''}</td><td class="num"><strong>${dec.format(c.mae)}</strong></td><td class="num">${pct(c.wape)}</td></tr>`).join('')}</tbody></table></div><p class="note">В каждом периоде используем только более ранние продажи. Автовыбор минимизирует MAE — среднюю абсолютную ошибку. WAPE — ошибка относительно объёма продаж.</p>`:'<div class="empty">Соберите 42 дня продаж для сравнения пяти методов на одинаковых периодах.</div>'}</section>
+  <section class="panel test-panel"><div class="eyebrow">ОТДЕЛЬНАЯ ПРОВЕРКА</div><h2>Тест на новых днях</h2>${t?`<p class="note">Последние 14 дней не участвовали в автоматическом выборе метода.</p><div class="test-metrics"><div><span class="meta">Средняя ошибка</span><strong>${dec.format(t.mae)} <small>шт.</small></strong></div><div><span class="meta">WAPE</span><strong>${pct(t.wape)}</strong></div></div><div class="test-caption"><strong>${METHODS[t.method].name}</strong><span>${date(t.start)} — ${date(t.end)}</span></div><p class="note">${p.manual?'Этот тест относится к автоматическому выбору, а не к методу, выбранному вручную. ':''}Проверен горизонт 14 дней. Ошибки на 7 и 30 днях могут отличаться.</p>`:'<p class="note">Нужно минимум 70 дней, чтобы выделить отдельный тест и два периода выбора метода.</p>'}<details><summary>Что прогноз не учитывает</summary><p class="note">Акции, изменение цены и спрос, потерянный при дефиците. Методы статистические, с фиксированными параметрами. Вероятностные интервалы пока не рассчитываются. Один исторический тест не гарантирует будущего качества.</p></details></section></div>
+  ${p.enough?`<section class="panel"><details><summary>Прогноз по дням · ${state.horizon} значений</summary><div class="table-wrap"><table><thead><tr><th>Дата</th><th class="num">Ожидаемые продажи, шт.</th></tr></thead><tbody>${future.map((d,i)=>`<tr><td>${d}</td><td class="num">${dec.format(p.forecast[i])}</td></tr>`).join('')}</tbody></table></div></details></section>`:''}`;
 }
 function actions(){const r=result;return head('План закупок','Что пополнить, в каком количестве и почему.',`<button class="button" id="export-plan" ${r.actions.length?'':'disabled'}>Скачать план CSV</button>`)+
   `<div class="stats">${stat('Плановый бюджет',money(r.budget),'По последней закупочной цене',true)}${stat('К закупке',n(sum(r.actions.map(p=>p.suggested)))+' шт.','Без ограничений бюджета и кратности')}${stat('Позиций в плане',String(r.actions.length),'Товары с дефицитом расчётного запаса')}${stat('Запас времени',state.safety+' дня','Буфер к сроку поставки')}</div>
@@ -43,30 +55,85 @@ function importPage(){const report=state.importResult;return head('Данные 
   ${report?report.errors.length?`<section class="error-box" role="alert"><strong>Импорт не применён. Исправьте ошибки и загрузите снова.</strong><ul>${report.errors.slice(0,12).map(e=>`<li>${e.line?'Строка '+e.line+': ':''}${esc(e.message)}</li>`).join('')}</ul>${report.errors.length>12?`<p>Всего ошибок: ${report.errors.length}.</p>`:''}<p>Предыдущие данные сохранены.</p></section>`:`<section class="success-box" role="status">Импортировано ${n(report.total)} строк из ${esc(state.file)}. <a href="#overview"><strong>Открыть аналитику</strong></a></section>`:''}
   <section class="panel schema" style="margin-top:22px"><div class="panel-head"><div><h2>Формат файла</h2><div class="meta">Все девять колонок обязательны</div></div></div><div class="table-wrap"><table><thead><tr><th>Колонка</th><th>Что указать</th><th>Пример</th></tr></thead><tbody>${[['date','Дата завершённого дня, YYYY-MM-DD','2026-10-07'],['sku','Уникальный артикул','Q-001'],['name','Согласованное название товара','Крем для лица'],['units','Продано за день, без возвратов','8'],['price','Средняя фактическая цена продажи за единицу, после скидок','6900'],['cost','Себестоимость единицы товара','3200'],['stock','Остаток на конец дня','18'],['on_order','Заказано поставщику, ещё не получено','0'],['lead_days','Срок поставки, целое число 0–90','7']].map(([k,d,v])=>`<tr><td><code>${k}</code></td><td>${d}</td><td>${v}</td></tr>`).join('')}</tbody></table></div><p class="note">Используем последние stock, on_order и lead_days каждого товара. Последняя дата должна совпадать для всех товаров. Для прогноза нужно 28 дней, для сравнения методов — 42. Возвраты и налоги эта версия не учитывает.</p><button class="button" id="demo">Вернуть демонстрационные данные</button></section>`;}
 function render(){
-  view=location.hash.slice(1);if(!titles[view])view='overview';result=analyze(state.rows,state.horizon,state.safety);
+  const focus=document.activeElement?.id;
+  view=location.hash.slice(1);if(!titles[view])view='overview';
+  const key=JSON.stringify([revision,state.horizon,state.period,state.safety,[...state.methods]]);
+  if(key!==cachedKey){result=analyze(state.rows,state.horizon,state.safety,{period:state.period,methods:state.methods});cachedKey=key;}
   document.querySelector('#breadcrumb').textContent=titles[view];document.title=titles[view]+' · Qadam AI';
   document.querySelectorAll('nav a').forEach(a=>{a.classList.toggle('active',a.dataset.view===view);if(a.dataset.view===view)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});
   document.querySelector('#action-count').textContent=result.actions.length;
   document.querySelector('#workspace-source').textContent=state.source==='demo'?'Учебный магазин косметики':'Ваши данные · CSV';
   document.querySelector('#source-banner').innerHTML=state.source==='demo'?'<span><strong>Демонстрационные данные</strong> · вымышленный магазин, 90 дней истории до 7 октября 2026.</span><a href="#import">Загрузить свои данные</a>':`<span><strong>Ваши данные</strong> · ${esc(state.file)} · ${n(state.rows.length)} строк · до ${date(result.end)} ${result.end.slice(0,4)}</span><a href="#import">Заменить файл</a>`;
-  app.innerHTML=({overview,forecast,actions,import:importPage}[view])();bind();
+  app.innerHTML=({overview,forecast,actions,import:importPage}[view])();enhance();bind();
+  if(focus)document.getElementById(focus)?.focus({preventScroll:true});
+}
+function enhance(){
+  if(view==='overview'){
+    if(result.products.some(p=>p.history[0].date>result.start))app.querySelector('.page-head').insertAdjacentHTML('afterend','<div class="callout partial-history">История короче 14 дней: показаны только доступные продажи. Пустые дни на графике не подтверждают отсутствие продаж.</div>');
+    const table=app.querySelector('table');
+    const toolbar=document.createElement('div');toolbar.className='catalog-toolbar';
+    toolbar.innerHTML=`<label for="search">Поиск по ассортименту<input id="search" type="search" placeholder="Название или артикул" value="${esc(state.query)}"></label><label for="stock-filter">Состояние запасов<select id="stock-filter"><option value="all" ${state.stockFilter==='all'?'selected':''}>Все товары</option><option value="reorder" ${state.stockFilter==='reorder'?'selected':''}>Нужна закупка</option><option value="short" ${state.stockFilter==='short'?'selected':''}>Мало истории</option></select></label><span id="search-count" class="meta" role="status"></span>`;
+    table.closest('.table-wrap').before(toolbar);filterProducts();
+    const panel=app.querySelector('.grid-main .panel');
+    panel.insertAdjacentHTML('beforeend',`<details class="chart-details"><summary>Выручка по дням</summary><div class="table-wrap"><table><thead><tr><th>Дата</th><th class="num">Выручка</th></tr></thead><tbody>${result.daily.map(d=>`<tr><td>${d.date}</td><td class="num">${money(d.revenue)}</td></tr>`).join('')}</tbody></table></div></details>`);
+  }
+  if(view==='actions'){
+    const stats=app.querySelectorAll('.stat-value');stats[3].textContent=state.safety+' дн.';
+    app.querySelectorAll('.action-card').forEach((card,i)=>{const p=result.actions[i];card.querySelector('.note').insertAdjacentHTML('beforeend',`<br><span class="meta">Метод: ${METHODS[p.method].name}${p.manual?' · выбран вручную':''}</span>`);});
+  }
+  if(view==='import'){
+    const checkbox=app.querySelector('#confirm-complete'),zone=app.querySelector('.upload-box');
+    checkbox.checked=state.complete;checkbox.disabled=state.busy;zone.before(checkbox.closest('label'));
+    zone.id='dropzone';zone.classList.toggle('enabled',state.complete);
+    app.querySelector('#file').disabled=!state.complete||state.busy;
+    zone.insertAdjacentHTML('beforeend','<p class="meta">Можно перетащить сюда один CSV-файл.</p>');
+    app.querySelector('#demo').disabled=state.busy;
+    zone.parentElement.insertAdjacentHTML('beforeend',`<details class="paste-details"><summary>Или вставьте содержимое CSV</summary><label for="csv-text" class="sr-only">Текст CSV</label><textarea id="csv-text" rows="6" spellcheck="false" placeholder="date,sku,name,units,price,cost,stock,on_order,lead_days"></textarea><button id="import-text" class="button primary" ${!state.complete||state.busy?'disabled':''}>Проверить и применить</button></details>`);
+    if(state.busy)zone.querySelector('h2').textContent='Проверяем данные…';
+  }
+}
+function filterProducts(){
+  const q=state.query.trim().toLocaleLowerCase('ru-RU');let count=0;
+  const table=app.querySelectorAll('table');const target=table[table.length-1];
+  target.querySelectorAll('tbody tr').forEach((row,i)=>{const p=result.products[i];if(!p)return;const match=(!q||(p.name+' '+p.sku).toLocaleLowerCase('ru-RU').includes(q))&&(state.stockFilter==='all'||(state.stockFilter==='reorder'?p.suggested>0:!p.enough));row.hidden=!match;if(match)count++;});
+  document.querySelector('#search-count').textContent=count?`Показано ${count} из ${result.products.length}`:'Ничего не найдено. Измените условия.';
+}
+function applyImport(text,name){
+  if(new TextEncoder().encode(text).length>10*1024*1024)throw Error('Данные больше 10 МБ.');
+  if(text.includes('\uFFFD'))throw Error('Сохраните CSV в кодировке UTF-8.');
+  const parsed=parseCSV(text);state.importResult={errors:parsed.errors,total:parsed.total};
+  if(!parsed.errors.length){state.rows=parsed.rows;state.source='upload';state.file=name;state.actions.clear();state.methods.clear();state.sku=null;state.query='';state.stockFilter='all';revision++;}
+}
+async function importFile(file){
+  if(!file||state.busy)return;
+  if(!state.complete){notify('Сначала подтвердите полноту истории.');return;}
+  state.busy=true;render();
+  try{if(file.size>10*1024*1024)throw Error('Файл больше 10 МБ.');applyImport(await file.text(),file.name);}
+  catch(error){state.importResult={errors:[{line:null,message:error.message}]};}
+  finally{state.busy=false;render();}
 }
 function bind(){
+  app.querySelectorAll('[data-setting]').forEach(el=>el.addEventListener('click',()=>{state[el.dataset.setting]=Number(el.dataset.value);render();}));
+  document.querySelector('#method')?.addEventListener('change',e=>{const p=selectedProduct();if(e.target.value==='auto')state.methods.delete(p.sku);else if(Object.hasOwn(METHODS,e.target.value))state.methods.set(p.sku,e.target.value);state.actions.delete(p.sku);render();notify('Прогноз и закупка этого товара пересчитаны.');});
+  document.querySelector('#export-forecast')?.addEventListener('click',()=>{const p=selectedProduct();download('qadam-forecast.csv',['date,forecast_units,method',...p.forecast.slice(0,state.horizon).map((v,i)=>`${addDays(result.end,i+1)},${v.toFixed(3)},${p.method}`)].join('\n'));notify('Прогноз скачан.');});
+  document.querySelector('#search')?.addEventListener('input',e=>{state.query=e.target.value;filterProducts();});
+  document.querySelector('#stock-filter')?.addEventListener('change',e=>{state.stockFilter=e.target.value;filterProducts();});
+  document.querySelector('#confirm-complete')?.addEventListener('change',e=>{state.complete=e.target.checked;document.querySelector('#file').disabled=!state.complete;document.querySelector('#import-text').disabled=!state.complete;document.querySelector('#dropzone').classList.toggle('enabled',state.complete);});
+  document.querySelector('#import-text')?.addEventListener('click',()=>{if(!state.complete||state.busy)return;const text=document.querySelector('#csv-text').value;try{applyImport(text,'Вставленный CSV');}catch(error){state.importResult={errors:[{line:null,message:error.message}]};}render();});
+  const zone=document.querySelector('#dropzone');
+  zone?.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('dragover');});
+  zone?.addEventListener('dragleave',()=>zone.classList.remove('dragover'));
+  zone?.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('dragover');if(e.dataTransfer.files.length!==1){notify('Загрузите один файл за раз.');return;}void importFile(e.dataTransfer.files[0]);});
   document.querySelector('#horizon')?.addEventListener('change',e=>{state.horizon=Number(e.target.value);render();});
   document.querySelector('#product')?.addEventListener('change',e=>{state.sku=e.target.value;render();});
-  document.querySelector('#apply-safety')?.addEventListener('click',()=>{const v=Number(document.querySelector('#safety').value);if(!Number.isInteger(v)||v<0||v>30){notify('Укажите целое число от 0 до 30.');return;}state.safety=v;state.actions.clear();render();notify('План закупок пересчитан.');});
+  document.querySelector('#apply-safety')?.addEventListener('click',()=>{const value=document.querySelector('#safety').value,v=Number(value);if(!value||!Number.isInteger(v)||v<0||v>30){notify('Укажите целое число от 0 до 30.');return;}state.safety=v;state.actions.clear();render();notify('План закупок пересчитан.');});
   document.querySelectorAll('[data-action]').forEach(el=>el.addEventListener('click',()=>{state.actions.set(el.dataset.sku,el.dataset.action);render();notify(el.dataset.action==='done'?'Заказ отмечен только в плане. Поставщику ничего не отправлено.':'Статус обновлён.');}));
   document.querySelector('#template')?.addEventListener('click',()=>download('qadam-example.csv',csv(demo())));
-  document.querySelector('#demo')?.addEventListener('click',()=>{state.rows=demo();state.source='demo';state.file='';state.actions.clear();state.importResult=null;state.sku=null;render();notify('Демонстрационные данные восстановлены.');});
+  document.querySelector('#demo')?.addEventListener('click',()=>{state.rows=demo();state.source='demo';state.file='';state.actions.clear();state.methods.clear();state.importResult=null;state.sku=null;state.query='';state.stockFilter='all';revision++;render();notify('Демонстрационные данные восстановлены.');});
   document.querySelector('#export-plan')?.addEventListener('click',()=>{const quote=v=>'"'+String(v).replace(/^[=+\-@]/,"'$&").replaceAll('"','""')+'"';const rows=result.actions.map(p=>[p.sku,p.name,p.suggested,p.cost,p.budget,p.lead_days,state.actions.get(p.sku)||'new']);download('qadam-purchase-plan.csv',['sku,name,quantity,unit_cost,budget,lead_days,status',...rows.map(r=>r.map(quote).join(','))].join('\n'));notify('План закупок скачан.');});
-  document.querySelector('#file')?.addEventListener('change',async e=>{
-    const file=e.target.files[0];if(!file)return;
-    if(!document.querySelector('#confirm-complete').checked){notify('Сначала подтвердите полноту истории под формой.');e.target.value='';return;}
-    try{if(file.size>10*1024*1024)throw Error('Файл больше 10 МБ.');const text=await file.text();if(text.includes('\uFFFD'))throw Error('Сохраните CSV в кодировке UTF-8.');const parsed=parseCSV(text);state.importResult=parsed;if(!parsed.errors.length){state.rows=parsed.rows;state.source='upload';state.file=file.name;state.actions.clear();state.sku=null;}render();}
-    catch(error){state.importResult={errors:[{line:null,message:error.message}]};render();}
-  });
+  document.querySelector('#file')?.addEventListener('change',e=>void importFile(e.target.files[0]));
 }
-window.addEventListener('hashchange',render);render();
+window.addEventListener('hashchange',()=>{render();window.scrollTo({top:0,behavior:'instant'});});render();
 if(document.modelContext?.registerTool){
   const lifecycle=new AbortController();
   const tool={name:'read_qadam_summary',description:'Read the current Qadam sales summary and purchase plan. No data is changed.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true,untrustedContentHint:true},execute(input){if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).length)throw Error('Expected an empty object.');return {source:state.source,asOf:result.end,revenue:result.revenue,grossProfit:result.margin,reorderBudget:result.budget,actions:result.actions.map(p=>({sku:p.sku,name:p.name,quantity:p.suggested,budget:p.budget}))};}};
