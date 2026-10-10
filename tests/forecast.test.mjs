@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {METHODS,predict,evaluate,metrics} from '../dist/forecast.mjs';
+import {BASE_METHODS as METHODS,predict,evaluate,metrics} from '../dist/forecast.mjs';
 import {analyze,addDays} from '../dist/core.mjs';
 const history=(count,fn=()=>10)=>Array.from({length:count},(_,i)=>({date:addDays('2026-01-01',i),units:fn(i),sku:'A',name:'Товар',price:100,cost:40,stock:20,on_order:10,lead_days:5}));
 test('all five methods preserve zero and constant demand at every horizon',()=>{for(const m of Object.keys(METHODS))for(const h of [7,14,30,120])for(const value of [0,10])assert.ok(predict(history(70,()=>value),h,m).every(v=>Math.abs(v-value)<1e-8));});

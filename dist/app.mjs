@@ -1,12 +1,15 @@
 import {demo,analyze,parseCSV,csv,addDays,sum} from './core.mjs';
 import {METHODS} from './forecast.mjs';
+import {ML_METHODS,validateReport} from './ml.mjs';
+import {simplify} from './layout.mjs';
 const app=document.querySelector('#app'),fmt=new Intl.NumberFormat('ru-RU',{maximumFractionDigits:0}),dec=new Intl.NumberFormat('ru-RU',{maximumFractionDigits:1});
 const n=v=>fmt.format(v),money=v=>n(v)+' ₸',esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const date=v=>new Date(v+'T00:00:00Z').toLocaleDateString('ru-RU',{day:'numeric',month:'short',timeZone:'UTC'}).replace(/\.$/,'');
 const state={rows:demo(),source:'demo',file:'',horizon:14,period:14,safety:3,sku:null,methods:new Map(),actions:new Map(),importResult:null,query:'',stockFilter:'all',complete:false,busy:false};
 const titles={overview:'Обзор продаж',forecast:'Прогноз спроса',actions:'План закупок',import:'Импорт данных'};
-document.querySelector('.profile small').textContent='Qadam AI · MVP 0.2';
-document.querySelector('.sidebar-bottom .small-label').textContent='ПЯТЬ МЕТОДОВ ПРОГНОЗА';
+document.querySelector('.profile small').textContent='Qadam AI · MVP 0.3';
+document.querySelector('.sidebar-bottom .small-label').textContent='ПРОДАЖИ И ЗАПАСЫ';
+let ml=null,demoML=null,mlStatus='Загружаем ML-результаты…';
 let result=analyze(state.rows),view='overview';
 let revision=0,cachedKey='';
 const pct=v=>v===null?'—':dec.format(v)+'%';
@@ -58,13 +61,13 @@ function render(){
   const focus=document.activeElement?.id;
   view=location.hash.slice(1);if(!titles[view])view='overview';
   const key=JSON.stringify([revision,state.horizon,state.period,state.safety,[...state.methods]]);
-  if(key!==cachedKey){result=analyze(state.rows,state.horizon,state.safety,{period:state.period,methods:state.methods});cachedKey=key;}
+  if(key!==cachedKey){result=analyze(state.rows,state.horizon,state.safety,{period:state.period,methods:state.methods,ml});cachedKey=key;}
   document.querySelector('#breadcrumb').textContent=titles[view];document.title=titles[view]+' · Qadam AI';
   document.querySelectorAll('nav a').forEach(a=>{a.classList.toggle('active',a.dataset.view===view);if(a.dataset.view===view)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});
   document.querySelector('#action-count').textContent=result.actions.length;
   document.querySelector('#workspace-source').textContent=state.source==='demo'?'Учебный магазин косметики':'Ваши данные · CSV';
   document.querySelector('#source-banner').innerHTML=state.source==='demo'?'<span><strong>Демонстрационные данные</strong> · вымышленный магазин, 90 дней истории до 7 октября 2026.</span><a href="#import">Загрузить свои данные</a>':`<span><strong>Ваши данные</strong> · ${esc(state.file)} · ${n(state.rows.length)} строк · до ${date(result.end)} ${result.end.slice(0,4)}</span><a href="#import">Заменить файл</a>`;
-  app.innerHTML=({overview,forecast,actions,import:importPage}[view])();enhance();bind();
+  app.innerHTML=({overview,forecast,actions,import:importPage}[view])();enhance();simplify(app,view);mlUI();bind();
   if(focus)document.getElementById(focus)?.focus({preventScroll:true});
 }
 function enhance(){
@@ -102,7 +105,7 @@ function applyImport(text,name){
   if(new TextEncoder().encode(text).length>10*1024*1024)throw Error('Данные больше 10 МБ.');
   if(text.includes('\uFFFD'))throw Error('Сохраните CSV в кодировке UTF-8.');
   const parsed=parseCSV(text);state.importResult={errors:parsed.errors,total:parsed.total};
-  if(!parsed.errors.length){state.rows=parsed.rows;state.source='upload';state.file=name;state.actions.clear();state.methods.clear();state.sku=null;state.query='';state.stockFilter='all';revision++;}
+  if(!parsed.errors.length){state.rows=parsed.rows;state.source='upload';state.file=name;state.actions.clear();state.methods.clear();state.sku=null;state.query='';state.stockFilter='all';ml=null;mlStatus='ML-модели ещё не обучены на этом CSV.';revision++;}
 }
 async function importFile(file){
   if(!file||state.busy)return;
@@ -129,11 +132,38 @@ function bind(){
   document.querySelector('#apply-safety')?.addEventListener('click',()=>{const value=document.querySelector('#safety').value,v=Number(value);if(!value||!Number.isInteger(v)||v<0||v>30){notify('Укажите целое число от 0 до 30.');return;}state.safety=v;state.actions.clear();render();notify('План закупок пересчитан.');});
   document.querySelectorAll('[data-action]').forEach(el=>el.addEventListener('click',()=>{state.actions.set(el.dataset.sku,el.dataset.action);render();notify(el.dataset.action==='done'?'Заказ отмечен только в плане. Поставщику ничего не отправлено.':'Статус обновлён.');}));
   document.querySelector('#template')?.addEventListener('click',()=>download('qadam-example.csv',csv(demo())));
-  document.querySelector('#demo')?.addEventListener('click',()=>{state.rows=demo();state.source='demo';state.file='';state.actions.clear();state.methods.clear();state.importResult=null;state.sku=null;state.query='';state.stockFilter='all';revision++;render();notify('Демонстрационные данные восстановлены.');});
+  document.querySelector('#demo')?.addEventListener('click',()=>{state.rows=demo();state.source='demo';state.file='';state.actions.clear();state.methods.clear();state.importResult=null;state.sku=null;state.query='';state.stockFilter='all';ml=demoML;mlStatus=demoML?'ML-модели обучены на вымышленных продажах.':'Демо-отчёт недоступен. Работают пять базовых методов.';revision++;render();notify('Демонстрационные данные восстановлены.');});
   document.querySelector('#export-plan')?.addEventListener('click',()=>{const quote=v=>'"'+String(v).replace(/^[=+\-@]/,"'$&").replaceAll('"','""')+'"';const rows=result.actions.map(p=>[p.sku,p.name,p.suggested,p.cost,p.budget,p.lead_days,state.actions.get(p.sku)||'new']);download('qadam-purchase-plan.csv',['sku,name,quantity,unit_cost,budget,lead_days,status',...rows.map(r=>r.map(quote).join(','))].join('\n'));notify('План закупок скачан.');});
   document.querySelector('#file')?.addEventListener('change',e=>void importFile(e.target.files[0]));
 }
 window.addEventListener('hashchange',()=>{render();window.scrollTo({top:0,behavior:'instant'});});render();
+async function applyML(text){
+  const rows=state.rows,atRevision=revision;
+  if(new TextEncoder().encode(text).length>10*1024*1024)throw Error('ML-отчёт больше 10 МБ.');
+  const checked=await validateReport(JSON.parse(text.replace(/^\uFEFF/,'')),rows);
+  if(atRevision!==revision)throw Error('Данные изменились во время проверки. Загрузите отчёт ещё раз.');
+  ml=checked;mlStatus=state.source==='demo'?'ML-модели обучены на вымышленных продажах.':'Подключён ML-отчёт для вашего CSV.';state.methods.clear();state.actions.clear();revision++;render();notify('ML-результаты подключены. Прогноз и план пересчитаны.');
+}
+function mlUI(){
+  if(view==='forecast'){
+    const p=selectedProduct(),entry=ml?.products[p.sku];
+    for(const option of app.querySelectorAll('#method option'))if(ML_METHODS[option.value]&&!entry)option.remove();
+    app.querySelector('.forecast-controls').insertAdjacentHTML('afterend',`<p class="ml-status">${esc(mlStatus)}${entry?' Доступны семь методов.':ml?' Для этого товара нужно 70 дней истории.':''}</p>`);
+  }
+  if(view==='overview'&&ml){
+    const flags=result.products.flatMap(p=>(ml.products[p.sku]?.anomalies??[]).filter(a=>a.flag).map(a=>({...a,p}))).sort((a,b)=>a.score-b.score);
+    const section=document.createElement('section');section.className='panel anomaly-panel';
+    section.innerHTML=`<div class="panel-head"><h2>Необычные продажи</h2><span class="badge neutral">${flags.length} наблюдений</span></div><p class="note">Isolation Forest · последние 14 дней. Сигнал для проверки, не доказательство проблемы.</p><details><summary>Посмотреть результаты</summary>${flags.length?`<div class="anomaly-list">${flags.map(a=>`<div><strong>${esc(a.p.name)}</strong><span>${date(a.date)} · ${n(a.p.history.find(r=>r.date===a.date).units)} шт.</span></div>`).join('')}</div>`:'<p>Необычных наблюдений не найдено.</p>'}<p class="note">Модель обучалась на более ранних днях. Сигналы могут быть ложными: проверьте акции, наличие товара и ошибки учёта. ${state.source==='demo'?'Здесь используются вымышленные данные.':''}</p></details>`;
+    app.querySelector('.catalog-section').before(section);
+  }
+  if(view==='import'){
+    app.insertAdjacentHTML('beforeend',`<section class="panel"><details><summary>Подключить CatBoost, LightGBM и поиск аномалий</summary><p class="note">${esc(mlStatus)} Для своих данных сначала обучите модели локально, затем загрузите полученный JSON. Нужно минимум 70 дней истории; отчёт должен точно соответствовать текущему CSV.</p><label class="form-control" for="ml-file">ML-отчёт JSON<input id="ml-file" type="file" accept=".json,application/json"></label><details><summary>Как подготовить отчёт</summary><p class="note">В локальной папке проекта установите зависимости из ml/requirements.txt и запустите ml/train.py с параметром --input, указав свой CSV. Подробная инструкция — в README проекта. Продажи остаются на вашем компьютере.</p><p class="note">Отчёт действует только до перезагрузки страницы. Для новых продаж модели нужно переобучить.</p></details><details><summary>Или вставьте JSON отчёта</summary><label class="sr-only" for="ml-text">JSON отчёта</label><textarea id="ml-text" rows="4"></textarea><button class="button" id="ml-apply">Подключить отчёт</button></details><p id="ml-error" class="note" role="status"></p></details></section>`);
+    const showError=e=>{const el=document.querySelector('#ml-error');if(el)el.textContent=e instanceof SyntaxError?'Не удалось прочитать JSON. Проверьте файл.':e.message;else notify(e.message);};
+    app.querySelector('#ml-file').addEventListener('change',async e=>{const file=e.target.files[0];if(!file)return;try{if(file.size>10*1024*1024)throw Error('ML-отчёт больше 10 МБ.');await applyML(await file.text());}catch(error){showError(error);}});
+    app.querySelector('#ml-apply').addEventListener('click',()=>void applyML(app.querySelector('#ml-text').value).catch(showError));
+  }
+}
+fetch('./models/demo-ml.json').then(r=>{if(!r.ok)throw Error('ML report unavailable');return r.json();}).then(r=>validateReport(r,demo())).then(report=>{demoML=report;if(state.source==='demo'){ml=report;mlStatus='ML-модели обучены на вымышленных продажах.';revision++;render();}}).catch(()=>{if(state.source==='demo'){mlStatus='Демо-отчёт недоступен. Работают пять базовых методов.';render();}});
 if(document.modelContext?.registerTool){
   const lifecycle=new AbortController();
   const tool={name:'read_qadam_summary',description:'Read the current Qadam sales summary and purchase plan. No data is changed.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true,untrustedContentHint:true},execute(input){if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).length)throw Error('Expected an empty object.');return {source:state.source,asOf:result.end,revenue:result.revenue,grossProfit:result.margin,reorderBudget:result.budget,actions:result.actions.map(p=>({sku:p.sku,name:p.name,quantity:p.suggested,budget:p.budget}))};}};

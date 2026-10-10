@@ -61,9 +61,11 @@ export function analyze(rows,horizon=14,safetyDays=3,options={}){
   const revenue=sum(recent.map(r=>r.units*r.price)),prevRevenue=sum(prev.map(r=>r.units*r.price));
   const products=[...groups].map(([sku,series])=>{
     series.sort((a,b)=>a.date.localeCompare(b.date));const last=series.at(-1),enough=series.length>=28;
-    const validation=evaluate(series),autoMethod=validation?.method??'weekday';
+    const ml=options.ml?.products?.[sku];
+    const validation=evaluate(series,ml),autoMethod=validation?.method??'weekday';
     const method=overrides.get(sku)??autoMethod;
-    const forecast=enough?predict(series,Math.max(horizon,last.lead_days+safetyDays,1),method):[];
+    const forecastDays=Math.max(horizon,last.lead_days+safetyDays,1);
+    const forecast=enough?(ml?.models[method]?.forecast.slice(0,forecastDays)??predict(series,forecastDays,method)):[];
     const total=enough?sum(forecast.slice(0,horizon)):null;
     const target=enough?sum(forecast.slice(0,last.lead_days+safetyDays)):null;
     const suggested=enough?Math.max(0,Math.ceil(target-last.stock-last.on_order)):null;
