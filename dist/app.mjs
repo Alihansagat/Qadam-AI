@@ -1,3 +1,4 @@
+import {budgetPanel,budgetSelection} from './budget.mjs';
 import {presentationPage,decoratePresentation} from './presentation.mjs';
 import {demo,analyze,parseCSV,csv,addDays,sum} from './core.mjs';
 import {METHODS} from './forecast.mjs';
@@ -70,7 +71,7 @@ function render(){
   document.querySelector('#action-count').textContent=result.actions.length;
   document.querySelector('#workspace-source').textContent=state.source==='demo'?'Учебный магазин косметики':'Ваши данные · CSV';
   document.querySelector('#source-banner').innerHTML=state.source==='demo'?'<span><strong>Демонстрационные данные</strong> · вымышленный магазин, 90 дней истории до 7 октября 2026.</span><a href="#import">Загрузить свои данные</a>':`<span><strong>Ваши данные</strong> · ${esc(state.file)} · ${n(state.rows.length)} строк · до ${date(result.end)} ${result.end.slice(0,4)}</span><a href="#import">Заменить файл</a>`;
-  app.innerHTML=({overview,forecast,actions,suppliers,presentation:presentationPage,import:importPage}[view])();enhance();simplify(app,view);mlUI();decoratePresentation(app,view,result,state);if(view==='suppliers')supplierPanel(app,result,notify,state.source);bind();
+  app.innerHTML=({overview,forecast,actions,suppliers,presentation:presentationPage,import:importPage}[view])();enhance();simplify(app,view);mlUI();decoratePresentation(app,view,result,state);if(view==='actions')budgetPanel(app,result,state.source,notify);if(view==='suppliers')supplierPanel(app,result,notify,state.source,budgetSelection(result,state.source));bind();
   if(focus)document.getElementById(focus)?.focus({preventScroll:true});
 }
 function enhance(){
