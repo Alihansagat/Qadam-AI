@@ -7,7 +7,7 @@ const app=document.querySelector('#app'),fmt=new Intl.NumberFormat('ru-RU',{maxi
 const n=v=>fmt.format(v),money=v=>n(v)+' ₸',esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const date=v=>new Date(v+'T00:00:00Z').toLocaleDateString('ru-RU',{day:'numeric',month:'short',timeZone:'UTC'}).replace(/\.$/,'');
 const state={rows:demo(),source:'demo',file:'',horizon:14,period:14,safety:3,sku:null,methods:new Map(),actions:new Map(),importResult:null,query:'',stockFilter:'all',complete:false,busy:false};
-const titles={overview:'Обзор продаж',forecast:'Прогноз спроса',actions:'План закупок',import:'Импорт данных'};
+const titles={overview:'Обзор продаж',forecast:'Прогноз спроса',actions:'План закупок',suppliers:'Заказы поставщикам',import:'Импорт данных'};
 document.querySelector('.profile small').textContent='Qadam AI · MVP 0.3';
 document.querySelector('.sidebar-bottom .small-label').textContent='ПРОДАЖИ И ЗАПАСЫ';
 let ml=null,demoML=null,mlStatus='Загружаем ML-результаты…';
@@ -49,6 +49,7 @@ function forecast(){
   <section class="panel test-panel"><div class="eyebrow">ОТДЕЛЬНАЯ ПРОВЕРКА</div><h2>Тест на новых днях</h2>${t?`<p class="note">Последние 14 дней не участвовали в автоматическом выборе метода.</p><div class="test-metrics"><div><span class="meta">Средняя ошибка</span><strong>${dec.format(t.mae)} <small>шт.</small></strong></div><div><span class="meta">WAPE</span><strong>${pct(t.wape)}</strong></div></div><div class="test-caption"><strong>${METHODS[t.method].name}</strong><span>${date(t.start)} — ${date(t.end)}</span></div><p class="note">${p.manual?'Этот тест относится к автоматическому выбору, а не к методу, выбранному вручную. ':''}Проверен горизонт 14 дней. Ошибки на 7 и 30 днях могут отличаться.</p>`:'<p class="note">Нужно минимум 70 дней, чтобы выделить отдельный тест и два периода выбора метода.</p>'}<details><summary>Что прогноз не учитывает</summary><p class="note">Акции, изменение цены и спрос, потерянный при дефиците. Методы статистические, с фиксированными параметрами. Вероятностные интервалы пока не рассчитываются. Один исторический тест не гарантирует будущего качества.</p></details></section></div>
   ${p.enough?`<section class="panel"><details><summary>Прогноз по дням · ${state.horizon} значений</summary><div class="table-wrap"><table><thead><tr><th>Дата</th><th class="num">Ожидаемые продажи, шт.</th></tr></thead><tbody>${future.map((d,i)=>`<tr><td>${d}</td><td class="num">${dec.format(p.forecast[i])}</td></tr>`).join('')}</tbody></table></div></details></section>`:''}`;
 }
+function suppliers(){return head('Заказы поставщикам','Подготовьте заказ, согласуйте поставку и отслеживайте оплату.', '<a class="button" href="#actions">Расчёт закупок</a>')+'<div class="stats" id="supplier-stats"></div>';}
 function actions(){const r=result;return head('План закупок','Что пополнить, в каком количестве и почему.',`<button class="button" id="export-plan" ${r.actions.length?'':'disabled'}>Скачать план CSV</button>`)+
   `<div class="stats">${stat('Плановый бюджет',money(r.budget),'По последней закупочной цене',true)}${stat('К закупке',n(sum(r.actions.map(p=>p.suggested)))+' шт.','Без ограничений бюджета и кратности')}${stat('Позиций в плане',String(r.actions.length),'Товары с дефицитом расчётного запаса')}${stat('Запас времени',state.safety+' дня','Буфер к сроку поставки')}</div>
   <section class="panel"><div class="toolbar"><label class="form-control">Дополнительный запас, дней <input id="safety" type="number" min="0" max="30" step="1" value="${state.safety}"></label><button class="button" id="apply-safety">Пересчитать</button></div><p class="note">Заказать = прогноз продаж за срок поставки + буфер дней − остаток − товар в пути. Отрицательный результат заменяется нулём, количество округляется вверх.</p><div class="meta">Товар в пути считается доступным к концу срока поставки. Проверьте дату его прибытия. Риск исчерпания текущего остатка рассчитан без поступлений. План — рекомендация, заказы поставщикам не отправляются.</div></section>
@@ -68,7 +69,7 @@ function render(){
   document.querySelector('#action-count').textContent=result.actions.length;
   document.querySelector('#workspace-source').textContent=state.source==='demo'?'Учебный магазин косметики':'Ваши данные · CSV';
   document.querySelector('#source-banner').innerHTML=state.source==='demo'?'<span><strong>Демонстрационные данные</strong> · вымышленный магазин, 90 дней истории до 7 октября 2026.</span><a href="#import">Загрузить свои данные</a>':`<span><strong>Ваши данные</strong> · ${esc(state.file)} · ${n(state.rows.length)} строк · до ${date(result.end)} ${result.end.slice(0,4)}</span><a href="#import">Заменить файл</a>`;
-  app.innerHTML=({overview,forecast,actions,import:importPage}[view])();enhance();simplify(app,view);mlUI();if(view==='actions')supplierPanel(app,result,notify,state.source);bind();
+  app.innerHTML=({overview,forecast,actions,suppliers,import:importPage}[view])();enhance();simplify(app,view);mlUI();if(view==='suppliers')supplierPanel(app,result,notify,state.source);bind();
   if(focus)document.getElementById(focus)?.focus({preventScroll:true});
 }
 function enhance(){
@@ -82,6 +83,7 @@ function enhance(){
     panel.insertAdjacentHTML('beforeend',`<details class="chart-details"><summary>Выручка по дням</summary><div class="table-wrap"><table><thead><tr><th>Дата</th><th class="num">Выручка</th></tr></thead><tbody>${result.daily.map(d=>`<tr><td>${d.date}</td><td class="num">${money(d.revenue)}</td></tr>`).join('')}</tbody></table></div></details>`);
   }
   if(view==='actions'){
+    app.querySelector('.page-head').insertAdjacentHTML('afterend','<a class="purchase-entry" href="#suppliers"><strong>Заказать у поставщика →</strong><span>Telegram, история заказов и счета к оплате</span></a>');
     const stats=app.querySelectorAll('.stat-value');stats[3].textContent=state.safety+' дн.';
     app.querySelectorAll('.action-card').forEach((card,i)=>{const p=result.actions[i];card.querySelector('.note').insertAdjacentHTML('beforeend',`<br><span class="meta">Метод: ${METHODS[p.method].name}${p.manual?' · выбран вручную':''}</span>`);});
   }
