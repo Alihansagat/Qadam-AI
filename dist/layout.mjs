@@ -6,7 +6,7 @@ function fold(element,title){
 }
 export function simplify(app,view){
   const h1=app.querySelector('h1'),subtitle=app.querySelector('.subtitle');
-  const copy={overview:['Обзор продаж','Главное за последние 14 дней.'],forecast:['Прогноз спроса','Сколько товара может понадобиться.'],actions:['План закупок','Количество, бюджет и приоритет.'],suppliers:['Заказы поставщикам','Заказ → подтверждение → оплата → получение.'],import:['Ваши данные','Один товар за день · один магазин · валюта ₸.']};
+  const copy={overview:['Обзор продаж','Главное за последние 14 дней.'],forecast:['Прогноз спроса','Сколько товара может понадобиться.'],actions:['План закупок','Количество, бюджет и приоритет.'],suppliers:['Заказы поставщикам','Заказ → подтверждение → оплата → получение.'],presentation:['Показать Qadam','Пять шагов от данных до закупки.'],import:['Ваши данные','Один товар за день · один магазин · валюта ₸.']};
   h1.textContent=copy[view][0];subtitle.textContent=copy[view][1];
   if(view==='overview'){
     const grid=app.querySelector('.grid-main'),leaders=grid.children[1];

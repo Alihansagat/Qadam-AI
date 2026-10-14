@@ -1,3 +1,4 @@
+import {presentationPage,decoratePresentation} from './presentation.mjs';
 import {demo,analyze,parseCSV,csv,addDays,sum} from './core.mjs';
 import {METHODS} from './forecast.mjs';
 import {ML_METHODS,validateReport} from './ml.mjs';
@@ -7,8 +8,8 @@ const app=document.querySelector('#app'),fmt=new Intl.NumberFormat('ru-RU',{maxi
 const n=v=>fmt.format(v),money=v=>n(v)+' ₸',esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const date=v=>new Date(v+'T00:00:00Z').toLocaleDateString('ru-RU',{day:'numeric',month:'short',timeZone:'UTC'}).replace(/\.$/,'');
 const state={rows:demo(),source:'demo',file:'',horizon:14,period:14,safety:3,sku:null,methods:new Map(),actions:new Map(),importResult:null,query:'',stockFilter:'all',complete:false,busy:false};
-const titles={overview:'Обзор продаж',forecast:'Прогноз спроса',actions:'План закупок',suppliers:'Заказы поставщикам',import:'Импорт данных'};
-document.querySelector('.profile small').textContent='Qadam AI · MVP 0.3';
+const titles={overview:'Обзор продаж',forecast:'Прогноз спроса',actions:'План закупок',suppliers:'Заказы поставщикам',presentation:'Презентация',import:'Импорт данных'};
+document.querySelector('.profile small').textContent='Qadam AI · MVP 0.4';
 document.querySelector('.sidebar-bottom .small-label').textContent='ПРОДАЖИ И ЗАПАСЫ';
 let ml=null,demoML=null,mlStatus='Загружаем ML-результаты…';
 let result=analyze(state.rows),view='overview';
@@ -69,7 +70,7 @@ function render(){
   document.querySelector('#action-count').textContent=result.actions.length;
   document.querySelector('#workspace-source').textContent=state.source==='demo'?'Учебный магазин косметики':'Ваши данные · CSV';
   document.querySelector('#source-banner').innerHTML=state.source==='demo'?'<span><strong>Демонстрационные данные</strong> · вымышленный магазин, 90 дней истории до 7 октября 2026.</span><a href="#import">Загрузить свои данные</a>':`<span><strong>Ваши данные</strong> · ${esc(state.file)} · ${n(state.rows.length)} строк · до ${date(result.end)} ${result.end.slice(0,4)}</span><a href="#import">Заменить файл</a>`;
-  app.innerHTML=({overview,forecast,actions,suppliers,import:importPage}[view])();enhance();simplify(app,view);mlUI();if(view==='suppliers')supplierPanel(app,result,notify,state.source);bind();
+  app.innerHTML=({overview,forecast,actions,suppliers,presentation:presentationPage,import:importPage}[view])();enhance();simplify(app,view);mlUI();decoratePresentation(app,view,result,state);if(view==='suppliers')supplierPanel(app,result,notify,state.source);bind();
   if(focus)document.getElementById(focus)?.focus({preventScroll:true});
 }
 function enhance(){
