@@ -23,7 +23,7 @@ def fit_predict(values, dates, horizon, method):
     x = np.asarray([features(values[:i], dates[i]) for i in range(14, len(values))])
     y = np.asarray(values[14:])
     if method == 'catboost':
-        model = catboost.CatBoostRegressor(iterations=80, depth=4, learning_rate=.05, loss_function='RMSE', random_seed=41, thread_count=1, verbose=False, allow_writing_files=False)
+        model = catboost.CatBoostRegressor(iterations=80, depth=4, learning_rate=.05, loss_function='RMSE', random_seed=41, thread_count=1, verbose=False, allow_writing_files=False, allow_const_label=True)
         model.fit(x, y)
         predict = lambda row: model.predict(np.asarray([row]))[0]
     else:
@@ -64,7 +64,7 @@ def train(payload):
             for origin in range(end-folds*14,end,14):
                 validation.extend(fit_predict(values[:origin],dates[:origin],14,method))
             models[method] = {'validation':validation,'test':fit_predict(values[:end],dates[:end],14,method),'forecast':fit_predict(values,dates,120,method)}
-        detector = IsolationForest(n_estimators=150, contamination='auto', random_state=41, n_jobs=1)
+        detector = IsolationForest(n_estimators=150, contamination=.05, random_state=41, n_jobs=1)
         detector.fit([anomaly_features(values,dates,i) for i in range(14,end)])
         scores = detector.decision_function([anomaly_features(values,dates,i) for i in range(end,len(rows))])
         anomalies = [{'date':rows[end+i]['date'],'score':float(score),'flag':bool(score<0)} for i,score in enumerate(scores)]

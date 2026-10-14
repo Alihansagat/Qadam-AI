@@ -16,6 +16,7 @@ export function simplify(app,view){
     const children=[...catalog.children].filter(x=>!x.classList.contains('panel-head'));
     const content=document.createElement('div');catalog.append(content);content.append(...children);fold(content,'Посмотреть ассортимент');
     app.querySelector('.grid-main .meta').textContent='Выручка, ₸';
+    app.querySelector('.grid-main .badge').remove();
   }
   if(view==='forecast'){
     const methods=app.querySelector('.evaluation-grid');

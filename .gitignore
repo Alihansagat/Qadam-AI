@@ -6,3 +6,8 @@ node_modules/
 __pycache__/
 output/
 catboost_info/
+dist/server/
+dist/.openai/
+.env
+.env.*
+!.env.example
