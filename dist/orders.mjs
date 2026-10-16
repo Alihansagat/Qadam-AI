@@ -1,4 +1,6 @@
 export function draftOrder(supplier,products,quantities){
+  if(!supplier||typeof supplier!=='object'||!Array.isArray(products)||!quantities)throw Error('Заполните поставщика и товары.');
+  if(new Set(products.map(p=>p.sku)).size!==products.length)throw Error('Один товар не может повторяться в заказе.');
   const name=String(supplier.name??'').trim(),handle=String(supplier.handle??'').trim().replace(/^@/,'');
   if(!name||name.length>120)throw Error('Укажите имя поставщика, до 120 символов.');
   if(!/^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(handle))throw Error('Укажите Telegram username поставщика: например, @supplier_name.');

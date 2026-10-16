@@ -1,1 +1,14 @@
-{"name":"qadam-ai","version":"0.3.0","private":true,"type":"module","scripts":{"start":"node server.mjs","test":"node --test tests/*.test.mjs"}}
+{
+  "name": "qadam-ai",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "build": "node scripts/build-worker.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

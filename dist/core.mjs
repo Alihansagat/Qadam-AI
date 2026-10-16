@@ -19,7 +19,7 @@ export function parseCSV(text){
   if(quoted)throw Error('В CSV не закрыта кавычка.');
   row.push(field.trim());if(row.some(Boolean))rows.push(row);
   if(rows.length<2)throw Error('Нужны заголовки и хотя бы одна строка данных.');
-  if(rows.length>50001)throw Error('Максимум 50 000 строк на один импорт.');
+  if(rows.length>5001)throw Error('Максимум 5 000 строк на один импорт.');
   const headers=rows.shift().map(h=>h.toLowerCase());
   if(new Set(headers).size!==headers.length)throw Error('Повторяющиеся названия колонок.');
   const missing=HEADERS.filter(h=>!headers.includes(h));if(missing.length)throw Error('Не хватает колонок: '+missing.join(', '));
@@ -60,9 +60,10 @@ export function analyze(rows,horizon=14,safetyDays=3,options={}){
   const recent=rows.filter(r=>r.date>=start),prev=rows.filter(r=>r.date>=previous&&r.date<start);
   const revenue=sum(recent.map(r=>r.units*r.price)),prevRevenue=sum(prev.map(r=>r.units*r.price));
   const products=[...groups].map(([sku,series])=>{
-    series.sort((a,b)=>a.date.localeCompare(b.date));const last=series.at(-1),enough=series.length>=28;
+    series.sort((a,b)=>a.date.localeCompare(b.date));const last=series.at(-1),enough=series.length>=7,preliminary=enough&&series.length<28;
     const ml=options.ml?.products?.[sku];
-    const validation=evaluate(series,ml),autoMethod=validation?.method??'weekday';
+    if(series.length<28&&overrides.has(sku)&&overrides.get(sku)!=='moving')throw Error('До 28 дней истории доступно только среднее за 7 дней: '+sku+'.');
+    const validation=evaluate(series,ml),autoMethod=series.length<28?'moving':validation?.method??'weekday';
     const method=overrides.get(sku)??autoMethod;
     const forecastDays=Math.max(horizon,last.lead_days+safetyDays,1);
     const forecast=enough?(ml?.models[method]?.forecast.slice(0,forecastDays)??predict(series,forecastDays,method)):[];
@@ -71,7 +72,7 @@ export function analyze(rows,horizon=14,safetyDays=3,options={}){
     const suggested=enough?Math.max(0,Math.ceil(target-last.stock-last.on_order)):null;
     let accumulated=0,stockout=null;for(let i=0;i<forecast.length;i++){accumulated+=forecast[i];if(accumulated>last.stock){stockout=i;break;}}
     const sold=series.filter(r=>r.date>=start);
-    return {...last,sku,history:series,days:series.length,enough,method,autoMethod,manual:overrides.has(sku),validation,forecast,total,suggested,target,stockout,revenue:sum(sold.map(r=>r.units*r.price)),margin:sum(sold.map(r=>r.units*(r.price-r.cost))),sold:sum(sold.map(r=>r.units)),budget:suggested===null?null:suggested*last.cost,stockValue:last.stock*last.cost};
+    return {...last,sku,history:series,days:series.length,enough,preliminary,method,autoMethod,manual:overrides.has(sku),validation,forecast,total,suggested,target,stockout,revenue:sum(sold.map(r=>r.units*r.price)),margin:sum(sold.map(r=>r.units*(r.price-r.cost))),sold:sum(sold.map(r=>r.units)),budget:suggested===null?null:suggested*last.cost,stockValue:last.stock*last.cost};
   }).sort((a,b)=>b.revenue-a.revenue);
   const daily=Array.from({length:period},(_,i)=>{const date=addDays(start,i);return {date,revenue:sum(recent.filter(r=>r.date===date).map(r=>r.units*r.price))};});
   return {end,start,period,revenue,margin:sum(recent.map(r=>r.units*(r.price-r.cost))),units:sum(recent.map(r=>r.units)),change:prevRevenue&&[...groups.values()].every(g=>g[0].date<=previous)?(revenue/prevRevenue-1)*100:null,products,daily,budget:sum(products.map(p=>p.budget||0)),actions:products.filter(p=>p.suggested>0).sort((a,b)=>(a.stockout??999)-(b.stockout??999)),horizon,safetyDays};

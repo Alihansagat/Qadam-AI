@@ -1,3 +1,4 @@
+import {handleDatasets} from './datasets.mjs';
 import {draftOrder,recordInvoice,transition} from '../dist/orders.mjs';
 const json=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
 const fail=message=>{throw Error(message);};
@@ -78,6 +79,7 @@ export async function api(request,env){
   if(!owner)return json({error:'Войдите в Qadam.'},401);
   if(request.method!=='GET'&&request.headers.get('Origin')!==url.origin)return json({error:'Недопустимый источник.'},403);
   try{
+    if(path.startsWith('/api/datasets/'))return await handleDatasets(request,env,owner);
     if(path==='/api/orders'&&request.method==='GET'){
       const rows=(await env.DB.prepare('SELECT * FROM qadam_orders WHERE owner=?').bind(owner).all()).results;
       return json({orders:rows.map(decode).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),connected:!!env.TELEGRAM_BOT_TOKEN});

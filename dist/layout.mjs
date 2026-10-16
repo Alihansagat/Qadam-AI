@@ -6,15 +6,16 @@ function fold(element,title){
 }
 export function simplify(app,view){
   const h1=app.querySelector('h1'),subtitle=app.querySelector('.subtitle');
-  const copy={overview:['Обзор продаж','Главное за последние 14 дней.'],forecast:['Прогноз спроса','Сколько товара может понадобиться.'],actions:['План закупок','Количество, бюджет и приоритет.'],suppliers:['Заказы поставщикам','Заказ → подтверждение → оплата → получение.'],presentation:['Показать Qadam','Пять шагов от данных до закупки.'],import:['Ваши данные','Один товар за день · один магазин · валюта ₸.']};
-  h1.textContent=copy[view][0];subtitle.textContent=copy[view][1];
+  const copy={overview:['Обзор продаж','Главное за последние 14 дней.'],forecast:['Прогноз спроса','Сколько товара может понадобиться.'],actions:['План закупок','Количество, бюджет и приоритет.'],suppliers:['Заказы поставщикам','Заказ → подтверждение → оплата → получение.'],marketing:['Маркетинг и реклама','Сравнение кампаний и рекомендации по бюджету.'],presentation:['Показать Qadam','Пять шагов от данных до закупки.'],import:['Ваши данные','Один товар за день · один магазин · валюта ₸.']};
+  if(!copy[view])return;h1.textContent=copy[view][0];subtitle.textContent=copy[view][1];
   if(view==='overview'){
     const grid=app.querySelector('.grid-main'),leaders=grid.children[1];
     const details=fold(leaders,'Лидеры продаж');details.classList.add('panel','leaders');
     grid.after(details);leaders.classList.remove('panel');leaders.querySelector('.panel-head').remove();
     const catalog=app.querySelector('.catalog-toolbar').closest('.panel');catalog.classList.add('catalog-section');
     const children=[...catalog.children].filter(x=>!x.classList.contains('panel-head'));
-    const content=document.createElement('div');catalog.append(content);content.append(...children);fold(content,'Посмотреть ассортимент');
+    const content=document.createElement('div');catalog.append(content);content.append(...children);// Assortment remains visible for daily work.
+    
     app.querySelector('.grid-main .meta').textContent='Выручка, ₸';
     app.querySelector('.grid-main .badge').remove();
   }
@@ -37,6 +38,6 @@ export function simplify(app,view){
     schema.after(demo);demo.classList.add('reset-demo');schema.querySelector('.panel-head').remove();
     const content=document.createElement('div');content.append(...schema.childNodes);schema.append(content);fold(content,'Формат CSV и требования к данным');
     app.querySelector('.upload-box h2').textContent='Загрузите продажи';
-    app.querySelector('.upload-box .note').textContent='CSV · UTF-8 · до 10 МБ';
+    app.querySelector('.upload-box .note').textContent='CSV · UTF-8 · до 1 МБ';
   }
 }
