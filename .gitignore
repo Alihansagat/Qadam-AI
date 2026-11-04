@@ -11,3 +11,6 @@ dist/.openai/
 .env
 .env.*
 !.env.example
+
+# Local preview renders and scratch work
+tmp/
